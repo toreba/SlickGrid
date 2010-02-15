@@ -241,6 +241,7 @@ if (!jQuery.fn.drag) {
         };
 
         // consts
+        var PAGESIZE = 1000000.0;  // in px
         var CAPACITY = 50;
         var MIN_BUFFER = 5;
         var BUFFER = MIN_BUFFER;  // will be set to equal one page
@@ -263,7 +264,7 @@ if (!jQuery.fn.drag) {
         var currentEditor = null;
         var editController;
 
-
+        var pages = [];
         var rowsCache = {};
         var renderedRows = 0;
         var numVisibleRows;
@@ -955,7 +956,7 @@ if (!jQuery.fn.drag) {
             var dataLoading = row < data.length && !d;
             var css = "slick-row " + (dataLoading ? " loading" : "") + (selectedRowsLookup[row] ? " selected ui-state-active" : "");
 
-            stringArray.push("<div class='ui-widget-content " + css + "' row='" + row + "' style='top:" + (options.rowHeight*row) + "px'>");
+            stringArray.push("<div class='ui-widget-content " + css + "' row='" + row + "' style='top:" + ((options.rowHeight*row)%PAGESIZE) + "px'>");
 
             for (var i=0, cols=columns.length; i<cols; i++) {
                 var m = columns[i];
@@ -982,7 +983,10 @@ if (!jQuery.fn.drag) {
         }
 
         function removeAllRows() {
-            $divMain[0].innerHTML = "";
+            for (var i=0; i<pages.length; i++) {
+                pages[i].innerHTML = "";
+            }
+
             rowsCache= {};
             postProcessedRows = {};
             counter_rows_removed += renderedRows;
@@ -1063,16 +1067,20 @@ if (!jQuery.fn.drag) {
             invalidatePostProcessingResults(row);
         }
 
+        function getCanvasHeight() {
+            return options.rowHeight * (data.length + (options.enableAddRow ? 1 : 0) + (options.leaveSpaceForNewRows? numVisibleRows - 1 : 0));
+        }
+
         function resizeCanvas() {
-            var newHeight = options.rowHeight * (data.length + (options.enableAddRow ? 1 : 0) + (options.leaveSpaceForNewRows? numVisibleRows - 1 : 0));
             if (options.autoHeight) { // use computed height to set both canvas _and_ divMainScroller, effectively hiding scroll bars.
-                $divMainScroller.height(newHeight);
+                $divMainScroller.height(getCanvasHeight());
             }
             else {
-            $divMainScroller.height(
-                    $container.innerHeight() -
-                    $divHeadersScroller.outerHeight() -
-                    (options.showSecondaryHeaderRow ? $divSecondaryHeadersScroller.outerHeight() : 0));            }
+                $divMainScroller.height(
+                        $container.innerHeight() -
+                        $divHeadersScroller.outerHeight() -
+                        (options.showSecondaryHeaderRow ? $divSecondaryHeadersScroller.outerHeight() : 0));
+            }
 
             viewportW = $divMainScroller.innerWidth();
             viewportH = $divMainScroller.innerHeight();
@@ -1087,20 +1095,13 @@ if (!jQuery.fn.drag) {
             }
             $divMain.width(totalWidth);
 
-            // browsers sometimes do not adjust scrollTop/scrollHeight when the height of contained objects changes
-            newHeight = Math.max(newHeight, viewportH - scrollbarDimensions.height);
-            if ($divMainScroller.scrollTop() > newHeight - $divMainScroller.height() + scrollbarDimensions.height) {
-                $divMainScroller.scrollTop(newHeight - $divMainScroller.height() + scrollbarDimensions.height);
-            }
-
-            $divMain.height(newHeight);
+            updateRowCount();
             render();
         }
 
         function updateRowCount() {
             // remove the rows that are now outside of the data range
             // this helps avoid redundant calls to .removeRow() when the size of the data decreased by thousands of rows
-            // var parentNode = $divMain[0];
             var l = options.enableAddRow ? data.length : data.length - 1;
             for (var i in rowsCache) {
                 if (i >= l) {
@@ -1108,15 +1109,42 @@ if (!jQuery.fn.drag) {
                 }
             }
 
-            var newHeight = Math.max(options.rowHeight * (data.length + (options.enableAddRow?1:0) + (options.leaveSpaceForNewRows?numVisibleRows-1:0)), viewportH - scrollbarDimensions.height);
+            var newHeight = Math.max(getCanvasHeight(), viewportH - scrollbarDimensions.height);
 
             // browsers sometimes do not adjust scrollTop/scrollHeight when the height of contained objects changes
             if ($divMainScroller.scrollTop() > newHeight - $divMainScroller.height() + scrollbarDimensions.height) {
                 $divMainScroller.scrollTop(newHeight - $divMainScroller.height() + scrollbarDimensions.height);
             }
-            $divMain.height(newHeight);
+
+            adjustCanvasPages();
         }
 
+        function adjustCanvasPages() {
+            var height = Math.max(getCanvasHeight(), viewportH - scrollbarDimensions.height);
+            var pageCount = Math.ceil(height/PAGESIZE);
+
+            // add missing pages
+            if (pages.length < pageCount) {
+                if (pages.length > 0) {
+                    $(pages[pages.length-1]).css("height", PAGESIZE + "px");
+                }
+
+                for (var i=pages.length; i<pageCount; i++) {
+                    pages.push($("<DIV style='position:relative;height:" + PAGESIZE + "px;'></DIV>").appendTo($divMain)[0]);
+                }
+            }
+
+            // remove unneeded pages
+            for (var i=pages.length; i>pageCount; i--) {
+                // updateRowCount() will clean up rows in pages being removed
+                $(pages.pop()).remove();
+            }
+
+            if (pageCount > 0) {
+                $(pages[pageCount-1]).css("height", (height - (pageCount-1)*PAGESIZE) + "px");
+            }
+        }
+        
         function getViewport() {
             return {
                 top:    Math.floor(currentScrollTop / options.rowHeight),
@@ -1126,7 +1154,6 @@ if (!jQuery.fn.drag) {
 
         function renderRows(from,to) {
             var i, l,
-                parentNode = $divMain[0],
                 rowsBefore = renderedRows,
                 stringArray = [],
                 rows =[],
@@ -1144,7 +1171,7 @@ if (!jQuery.fn.drag) {
             x.innerHTML = stringArray.join("");
 
             for (i = 0, l = x.childNodes.length; i < l; i++) {
-                rowsCache[rows[i]] = parentNode.appendChild(x.firstChild);
+                rowsCache[rows[i]] = pages[Math.floor((rows[i]*options.rowHeight)/PAGESIZE)].appendChild(x.firstChild);
             }
 
             if (renderedRows - rowsBefore > MIN_BUFFER) {
@@ -1328,7 +1355,7 @@ if (!jQuery.fn.drag) {
                     else if (idx == -1 && e.ctrlKey)
                         selection.push(row);
                     else if (idx != -1 && e.ctrlKey)
-                        selection = $.grep(selection, function(o, i) { return (o != row); });
+                        selection = $.grep(selection, function(o) { return (o != row); });
                     else if (idx == -1 && selection.length == 1 && e.shiftKey) {
                         var from = Math.min(row, selection[0]);
                         var to = Math.max(row, selection[0]);
