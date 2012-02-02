@@ -466,6 +466,10 @@ if (typeof Slick === "undefined") {
           $("<div class='ui-state-default slick-headerrow-column l" + i + " r" + i + "'></div>")
               .appendTo($headerRow);
         }
+        if(options.customHeader) {
+          options.customHeader({header: header,column: m});
+        }
+
       }
 
       setSortColumn(sortColumnId, sortAsc);
